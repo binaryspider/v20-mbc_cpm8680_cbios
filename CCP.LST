@@ -1,0 +1,1540 @@
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE   1
+
+
+                        ;  CONSOLE COMMAND PROCESSOR
+                        ;
+                        ;  FOR CP/M 86
+                        ;
+                        ;  1983.8.8.
+                        ;
+                        ;  EQUATIONS OF BDOS FUNCTION
+                        ;
+   0000                 CRSTSY  EQU     0               ;RESET SYSTEM
+   0001                 CCONIN  EQU     1               ;CONSOLE INPUT
+   0002                 CCONOT  EQU     2               ;CONSOLE OUTPUT
+   000A                 CRDCBF  EQU     10              ;READ CONSOLE BUFFER
+   000B                 CCONST  EQU     11              ;CONSOLE STATUS
+   000D                 CINBDS  EQU     13              ;INITIALIZE BDOS
+   000E                 CSELDR  EQU     14              ;SELECT DRIVE
+   000F                 COPEN   EQU     15              ;OPEN FILE
+   0010                 CCLOSE  EQU     16              ;CLOSE FILE
+   0011                 CSERCH  EQU     17              ;SEARCH DIRECTORY FIRST
+   0012                 CSERCN  EQU     18              ;SEARCH NEXT
+   0013                 CDELET  EQU     19              ;DELETE FILE
+   0014                 CREADN  EQU     20              ;READ SEQUENTIAL
+   0017                 CRENAM  EQU     23              ;RENAME
+   0019                 CGTDRV  EQU     25              ;INTERROGATE DRIVE
+   001A                 CSTDMA  EQU     26              ;SET DMA OFFSET
+   0020                 CGTUSR  EQU     32              ;GET/SET USER CODE
+   0032                 CDBIOS  EQU     50              ;DIRECT BIOS CALL
+   0033                 CSTDMS  EQU     51              ;SET DMA SEGMENT
+   003A                 CMFREE  EQU     58              ;FREE ALL MEMORY
+   003B                 CLOADP  EQU     59              ;LOAD PROGRAM
+                        ;
+                        ;  EQUATIONS OF DATA
+                        ;
+   00E0                 BDOSI   EQU     0E0H            ;BDOS INTERRUPT
+   000A                 LF      EQU     0AH             ;LINE FEED
+   000D                 CR      EQU     0DH             ;CARRIAGTE RETURN
+   001A                 EOF     EQU     1AH             ;END OF FILE
+   0080                 SCTLNG  EQU     128             ;ONE SECTOR DATA LENGTH
+                        ;
+   0B00                 BDOS    EQU     .0B00H          ;BODS ENTRY
+                        ;
+                        ;  EQUATIONS OF BASE PAGE OFFSET
+                        ;
+   0000                 DFPAGE  EQU     0               ;BASE PAGE TOP
+   000F                 DFESSG  EQU     0FH             ;EXTRA SEGMENT
+   005C                 DFCB    EQU     5CH             ;DEFAULT FCB
+   0080                 DFCMBF  EQU     80H             ;DEFAULT COMMAND BUFFER
+   0080                 SYSDMA  EQU     80H             ;SYSTEM DMA ADDRESS
+                        ;
+                        ;
+                                CSEG
+                                ORG     0
+                        ;
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE   2
+
+
+                        TOP:                            ;TAG FOR BIASED ADDRESS
+                        ;
+                        ;  CCP ENTRY JUMP TABLE
+                        ;
+ 0000 E92A03       032D         JMP     CCPCLD          ;COLD START
+ 0003 E92103       0327         JMP     CCPABE
+ 0006 E90203       030B         JMP     CCPHOT          ;HOT START
+                        ;
+                        ;  COMMAND READ BUFFER
+                        ;
+ 0009 7F                CMBUFF  DB      127             ;BUFFER LENGTH
+ 000A 00                        DB      0               ;LENGTH OF CODE
+ 000B 202020202020              DB      '                '
+      202020202020
+      20202020
+ 001B 434F50595249              DB      'COPYRIGHT (C) 1980, '
+      474854202843
+      292031393830
+      2C20
+ 002F 444947495441              DB      'DIGITAL RESEARCH  '
+      4C2052455345
+      415243482020
+ 0041                           RS      74
+                        ;
+                        ;  TO BDOS
+                        ;
+                        ENBDOS:
+ 008B CDE0                      INT     BDOSI           ;TO BDOS
+ 008D 8CCD                      MOV     BP,CS
+ 008F 8EC5                      MOV     ES,BP
+ 0091 C3                        RET
+                        ;
+                        ;  SYSTEM RESET
+                        ;
+                        SYSRST:
+ 0092 B100                      MOV     CL,CRSTSY
+ 0094 33D2                      XOR     DX,DX
+ 0096 EBF3         008B         JMPS    ENBDOS
+                        ;
+                        ;  CONSOLE OUT
+                        ;  INPUT
+                        ;  AL:CODE
+                        ;
+                        CONOUT:
+ 0098 8AD0                      MOV     DL,AL
+ 009A B102                      MOV     CL,CCONOT
+ 009C EBED         008B         JMPS    ENBDOS
+                        ;
+                        ;  SPACE
+                        ;
+                        SPACE:
+ 009E B020                      MOV     AL,' '
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE   3
+
+
+                        CONOTB:
+ 00A0 51                        PUSH    CX
+ 00A1 E8F4FF       0098         CALL    CONOUT
+ 00A4 59                        POP     CX
+ 00A5 C3                        RET
+                        ;
+                        ;  CARRIAGE RETURN & LINE FEED
+                        ;
+                        CRLF:
+ 00A6 B00D                      MOV     AL,CR
+ 00A8 E8F5FF       00A0         CALL    CONOTB
+ 00AB B00A                      MOV     AL,LF
+ 00AD EBF1         00A0         JMPS    CONOTB
+                        ;
+                        ;  PRINT BUFFERED STRING
+                        ;  INPUT
+                        ;  CX:STRING POINTER
+                        ;
+                        BUFPRN:
+ 00AF 51                        PUSH    CX
+ 00B0 E8F3FF       00A6         CALL    CRLF
+ 00B3 5B                        POP     BX
+                        BUFPRL:
+ 00B4 8A07                      MOV     AL,[BX]         ;GET CODE
+ 00B6 0AC0                      OR      AL,AL
+ 00B8 7501         00BB         JNZ     BUFPRS          ;GET ACTIVE CODE
+ 00BA C3                        RET                     ;END BY 0
+                        ;
+                        BUFPRS:
+ 00BB 43                        INC     BX
+ 00BC 53                        PUSH    BX
+ 00BD E8D8FF       0098         CALL    CONOUT
+ 00C0 5B                        POP     BX
+ 00C1 EBF1         00B4         JMPS    BUFPRL          ;TO NEXT
+                        ;
+                        ;  LOAD PROGRAM
+                        ;
+                        LOADPR:
+ 00C3 BA2708                    MOV     DX,OFFSET WKFCB
+ 00C6 B13B                      MOV     CL,CLOADP
+ 00C8 EBC1         008B         JMPS    ENBDOS
+                        ;
+                        ;  DIRECT BIOS SELECT DISK
+                        ;
+                        SELDSK:
+ 00CA B93200                    MOV     CX,CDBIOS
+ 00CD BA3009                    MOV     DX,OFFSET WKBIOS
+ 00D0 EBB9         008B         JMPS    ENBDOS
+                        ;
+                        ;  FREE ALL MEMORY
+                        ;
+                        MEMFRE:
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE   4
+
+
+ 00D2 B13A                      MOV     CL,CMFREE
+ 00D4 EBB5         008B         JMPS    ENBDOS
+                        ;
+                        ;  INITIALIZE BDOS
+                        ;
+                        INBDOS:
+ 00D6 B10D                      MOV     CL,CINBDS
+ 00D8 EBB1         008B         JMPS    ENBDOS
+                        ;
+                        ;  SELECT DRIVE
+                        ;  INPUT
+                        ;  AL:DRIVE NUMBER
+                        ;
+                        SELDRV:
+ 00DA 8AD0                      MOV     DL,AL
+ 00DC B10E                      MOV     CL,CSELDR
+ 00DE EBAB         008B         JMPS    ENBDOS
+                        ;
+                        ;  DIRECTORY PROCESS COMMON
+                        ;  OUTPUT
+                        ;  ZF:ON ERROR
+                        ;
+                        DIRCOM:
+ 00E0 E8A8FF       008B         CALL    ENBDOS
+ 00E3 A2CD08                    MOV     BSDIRC,AL       ;SAVE BIAS OF DIRECTORY
+ 00E6 FEC0                      INC     AL
+ 00E8 C3                        RET
+                        ;
+                        ;  OPEN FILE
+                        ;
+                        OPEN:
+ 00E9 B10F                      MOV     CL,COPEN
+ 00EB EBF3         00E0         JMPS    DIRCOM
+                        ;
+                        ;  OPEN BY WORK FCB
+                        ;
+                        OPENW:
+ 00ED C606470800                MOV     WKFCB+32,0      ;CLEAR CURRENT RECORD
+ 00F2 BA2708                    MOV     DX,OFFSET WKFCB
+ 00F5 EBF2         00E9         JMPS    OPEN
+                        ;
+                        ;  CLOSE FILE
+                        ;
+                        CLOSE:
+ 00F7 B110                      MOV     CL,CCLOSE
+ 00F9 E8E4FF       00E0         CALL    DIRCOM
+ 00FC 7401         00FF         JZ      CLOSER
+ 00FE C3                        RET
+                        ;
+                        CLOSER:                         ;CLOSE ERROR
+ 00FF B99B09                    MOV     CX,OFFSET CCLSER
+ 0102 EB20         0124         JMPS    WHYPR
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE   5
+
+
+                        ;
+                        ;  SEARCH FIRST
+                        ;
+                        SEARCH:
+ 0104 B111                      MOV     CL,CSERCH
+ 0106 EBD8         00E0         JMPS    DIRCOM
+                        ;
+                        ;  SEARCH NEXT
+                        ;
+                        SEARCN:
+ 0108 B112                      MOV     CL,CSERCN
+ 010A EBD4         00E0         JMPS    DIRCOM
+                        ;
+                        ;  SEARCH BY WORK FCB
+                        ;
+                        SEARCW:
+ 010C BA2708                    MOV     DX,OFFSET WKFCB
+ 010F EBF3         0104         JMPS    SEARCH
+                        ;
+                        ;  DELETE FILE
+                        ;
+                        DELETF:
+ 0111 B113                      MOV     CL,CDELET
+ 0113 EB1D         0132         JMPS    TENBDS
+                        ;
+                        ;  READ WRITE COMMON
+                        ;  OUTPUT
+                        ;  ZF:ON OK
+                        ;
+                        FRWCOM:
+ 0115 E873FF       008B         CALL    ENBDOS
+ 0118 0AC0                      OR      AL,AL
+ 011A C3                        RET
+                        ;
+                        ;  READ SEQUENTIAL
+                        ;
+                        READNX:
+ 011B B114                      MOV     CL,CREADN
+ 011D EBF6         0115         JMPS    FRWCOM
+                        ;
+                        ;  READ WORK FCB FILE
+                        ;
+                        READNW:
+ 011F BA2708                    MOV     DX,OFFSET WKFCB
+ 0122 EBF7         011B         JMPS    READNX
+                        ;
+                        ;  ERROR COMMENT OUT & END
+                        ;
+                        WHYPR:
+ 0124 E888FF       00AF         CALL    BUFPRN
+ 0127 E9B706       07E1         JMP     ENCPRC
+                        ;
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE   6
+
+
+                        ;  RENAME
+                        ;
+                        RENAME:
+ 012A B117                      MOV     CL,CRENAM
+ 012C EB04         0132         JMPS    TENBDS
+                        ;
+                        ;  GET/SET USER CODE
+                        ;
+                        GETUSR:
+ 012E B2FF                      MOV     DL,0FFH
+                        GETUSS:
+ 0130 B120                      MOV     CL,CGTUSR
+                        TENBDS:
+ 0132 E956FF       008B         JMP     ENBDOS
+                        ;
+                        ;  MODIFY LOWER CASE TO UPER CASE ALPHABET
+                        ;  INPUT/OUTPUT
+                        ;  AL:CODE
+                        ;
+                        MODIFY:
+ 0135 3C61                      CMP     AL,'A'+20H
+ 0137 7206         013F         JC      MODIFE          ;TOO SMALL
+ 0139 3C7B                      CMP     AL,'Z'+21H
+ 013B 7302         013F         JNC     MODIFE          ;TOO LARGE
+ 013D 245F                      AND     AL,05FH         ;TO LOWER CASE
+                        MODIFE:
+ 013F C3                        RET
+                        ;
+                        ;  READ COMMAND LINE
+                        ;
+                        RDCOMN:
+ 0140 F6060508FF                TEST    MDSUBE,0FFH
+ 0145 7458         019F         JZ      RDCOMK          ;NO SUBMIT FILE TO KEY INPUT
+ 0147 F6063909FF                TEST    CURDRV,0FFH
+ 014C 7405         0153         JZ      RDCOMS          ;CURRENT DRIVE IS HOME
+ 014E 33C0                      XOR     AX,AX
+ 0150 E887FF       00DA         CALL    SELDRV          ;TO HOME DRIVE
+                        RDCOMS:
+ 0153 BA0608                    MOV     DX,OFFSET SUBFCB
+ 0156 E890FF       00E9         CALL    OPEN            ;OPEN SUBMIT FILE
+ 0159 7444         019F         JZ      RDCOMK          ;NOT FOUND SO TO KEY INPUT
+ 015B A01508                    MOV     AL,SUBFCB+15
+ 015E FEC8                      DEC     AL
+ 0160 A22608                    MOV     SUBFCB+32,AL    ;SET BOTTOM RECORD OF FILE
+ 0163 BA0608                    MOV     DX,OFFSET SUBFCB
+ 0166 E8B2FF       011B         CALL    READNX          ;GET LAST LINE
+ 0169 7534         019F         JNZ     RDCOMK          ;READ ERROR SO TO KEY INPUT
+ 016B BF0A00                    MOV     DI,OFFSET CMBUFF+1
+ 016E BE4B08                    MOV     SI,OFFSET RWBUFF
+ 0171 B98000                    MOV     CX,SCTLNG
+ 0174 E8C502       043C         CALL    COPY            ;MOVE TO COMMAND BUFFER
+ 0177 C606140800                MOV     SUBFCB+14,0     ;CLEAR EXTENT
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE   7
+
+
+ 017C FE0E1508                  DEC     SUBFCB+15       ;DOWN LENGTH
+ 0180 BA0608                    MOV     DX,OFFSET SUBFCB
+ 0183 E871FF       00F7         CALL    CLOSE           ;SET RECORD COUNT
+ 0186 7417         019F         JZ      RDCOMK          ;CLOSE ERROR SO TO KEY INPUT
+ 0188 A03909                    MOV     AL,CURDRV
+ 018B E84CFF       00DA         CALL    SELDRV          ;TO CURRENT DRIVE
+ 018E BB0B00                    MOV     BX,OFFSET CMBUFF+2
+ 0191 E820FF       00B4         CALL    BUFPRL          ;OUT CURRENT COMMAND LINE
+ 0194 E83200       01C9         CALL    CHKCIT          ;CHECK KEY INTERRUPT
+ 0197 7411         01AA         JZ      RDCOMD          ;OK TO INTERPRET COMMAND LINE
+ 0199 E85600       01F2         CALL    DELSUB          ;CANCEL SUBMIT MODE
+ 019C E9BF01       035E         JMP     CCPLOP
+                        ;
+                        RDCOMK:                         ;KEY INPUT MODE
+ 019F E85000       01F2         CALL    DELSUB          ;DELETE SUBMIT FILE
+ 01A2 B10A                      MOV     CL,CRDCBF
+ 01A4 BA0900                    MOV     DX,OFFSET CMBUFF
+ 01A7 E8E1FE       008B         CALL    ENBDOS          ;GET COMMAND FROM KEY
+                        RDCOMD:
+ 01AA BB0B00                    MOV     BX,OFFSET CMBUFF+2
+ 01AD 33C9                      XOR     CX,CX
+ 01AF 2E8A0E0A00                MOV     CL,CMBUFF+1     ;GET COUNT
+ 01B4 E30A         01C0         JCXZ    RDCOME          ;NO LENGTH
+                        RDCOML:                         ;COMMAND LINE MODIFY LOOP
+ 01B6 8A07                      MOV     AL,[BX]
+ 01B8 E87AFF       0135         CALL    MODIFY          ;LOWER CASE TO UPER CASE
+ 01BB 8807                      MOV     [BX],AL
+ 01BD 43                        INC     BX
+ 01BE E2F6         01B6         LOOP    RDCOML
+                        RDCOME:
+ 01C0 882F                      MOV     [BX],CH         ;SET END MARK
+ 01C2 C70635090B00              MOV     PNTCMD,OFFSET CMBUFF+2 ;SET COMMAND POINTER TO TOP
+ 01C8 C3                        RET
+                        ;
+                        ;  CHECK KEY INTERRUPT
+                        ;  OUTPUT
+                        ;  ZF:OFF INTERRUPTED
+                        ;
+                        CHKCIT:
+ 01C9 B10B                      MOV     CL,CCONST
+ 01CB E8BDFE       008B         CALL    ENBDOS
+ 01CE 0AC0                      OR      AL,AL
+ 01D0 7501         01D3         JNZ     CHKCIG          ;GET SOME DATA
+ 01D2 C3                        RET                     ;NOT INTERRUPTED
+                        ;
+                        CHKCIG:
+ 01D3 B101                      MOV     CL,CCONIN
+ 01D5 E8B3FE       008B         CALL    ENBDOS          ;GET DATA
+ 01D8 0AC0                      OR      AL,AL           ;SET FLAG
+ 01DA C3                        RET
+                        ;
+                        ;  INTERROGATE DRIVE NUMBER
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE   8
+
+
+                        ;
+                        GTDRVN:
+ 01DB B119                      MOV     CL,CGTDRV
+ 01DD EB10         01EF         JMPS    STDMAC
+                        ;
+                        ;  SET DMA SEGMENT
+                        ;
+                        STDMAS:
+ 01DF B133                      MOV     CL,CSTDMS
+ 01E1 EB0C         01EF         JMPS    STDMAC
+                        ;
+                        ;  SET DEFAULT DMA ADDRESS
+                        ;
+                        STDMAA:
+ 01E3 8B160308                  MOV     DX,DDMASG
+ 01E7 E8F5FF       01DF         CALL    STDMAS
+ 01EA BA8000                    MOV     DX,SYSDMA       ;SYSTEM DMA ADDRESS OFFSET
+                        ;
+                        ;  SET DMA OFFSET
+                        ;
+                        STDMAO:
+ 01ED B11A                      MOV     CL,CSTDMA
+                        STDMAC:
+ 01EF E999FE       008B         JMP     ENBDOS
+                        ;
+                        ;  DELETE SUBMIT FILE
+                        ;
+                        DELSUB:
+ 01F2 F6060508FF                TEST    MDSUBE,0FFH
+ 01F7 7501         01FA         JNZ     DELSUS          ;EXIST SUBMIT FILE
+ 01F9 C3                        RET                     ;NO SUBMIT FILE
+                        ;
+                        DELSUS:
+ 01FA B000                      MOV     AL,0
+ 01FC A20508                    MOV     MDSUBE,AL       ;CLEAR SUBMIT FILE EXIST MODE
+ 01FF E8D8FE       00DA         CALL    SELDRV          ;TO HOME DRIVE
+ 0202 BA0608                    MOV     DX,OFFSET SUBFCB
+ 0205 E809FF       0111         CALL    DELETF          ;DELETE SUBMIT FILE
+ 0208 A03909                    MOV     AL,CURDRV
+ 020B E9CCFE       00DA         JMP     SELDRV          ;TO CURRENT DRIVE
+                        ;
+                        ;  CHECK USER ID CODE
+                        ;
+                        CHKUID:
+ 020E BFDC09                    MOV     DI,OFFSET IDCODE
+ 0211 BE000B                    MOV     SI,OFFSET BDOS  ;ID CODE IN BDOS
+ 0214 B90600                    MOV     CX,6            ;ID CODE LENGTH
+ 0217 F3A6                      REPZ    CMPSB
+ 0219 E302         021D         JCXZ    CHKUIP          ;OK END
+ 021B EB01         021E         JMPS    CHKUIM          ;MISS MATCH
+                        ;
+                        CHKUIP:
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE   9
+
+
+ 021D C3                        RET
+                        ;
+                        CHKUIM:                         ;MISS MATCH STOP
+ 021E F4                        HLT
+                        ;
+                        ;  CHECK TERMINATOR
+                        ;  INPUT
+                        ;  SI:DATA POINTER
+                        ;  OUTPUT
+                        ;  ZF:ON TERMINATOR
+                        ;
+                        CHKTRM:
+ 021F 8A04                      MOV     AL,[SI]         ;GET CODE
+ 0221 0AC0                      OR      AL,AL
+ 0223 7501         0226         JNZ     CHKTRN
+ 0225 C3                        RET                     ;ZERO IS END CODE
+                        ;
+                        CHKTRN:
+ 0226 3C20                      CMP     AL,' '
+ 0228 7303         022D         JNC     CHKTRT
+ 022A E99301       03C0         JMP     COMERR          ;CONTROL CODE SO ERROR
+                        ;
+                        CHKTRT:
+ 022D 57                        PUSH    DI
+ 022E BF3B09                    MOV     DI,OFFSET IXTERM
+ 0231 B90900                    MOV     CX,9
+ 0234 FC                        CLD
+ 0235 F2AE                      REPNZ   SCASB           ;CHECK
+ 0237 5F                        POP     DI
+ 0238 C3                        RET
+                        ;
+                        ;  SEARCH TOP
+                        ;  OUTPUT
+                        ;  ZF:ON NO DATA
+                        ;
+                        SRCHTP:
+ 0239 8A04                      MOV     AL,[SI]
+ 023B 3C00                      CMP     AL,0
+ 023D 7501         0240         JNZ     SRCHTT
+ 023F C3                        RET                     ;END OF DATA
+                        ;
+                        SRCHTT:
+ 0240 3C20                      CMP     AL,' '
+ 0242 7401         0245         JZ      SRCHTN          ;TO NEXT
+ 0244 C3                        RET                     ;GET SOME CODE
+                        ;
+                        SRCHTN:                         ;TO NEXT
+ 0245 46                        INC     SI
+ 0246 EBF1         0239         JMPS    SRCHTP
+                        ;
+                        ;  FILL BY SPACE  FOR FILE NAME
+                        ;
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  10
+
+
+                        FILLSP:
+ 0248 43                        INC     BX
+ 0249 C60720                    MOV     BYTE PTR [BX],' '
+ 024C E2FA         0248         LOOP    FILLSP
+ 024E C3                        RET
+                        ;
+                        ;  GET ONE COMMAND BLOCK
+                        ;  INPUT
+                        ;  CX:BLOCK LENGTH
+                        ;  BX:DESTINATION POINTER
+                        ;  SI:SOURCE POINTER
+                        ;
+                        GTONBK:
+ 024F 51                        PUSH    CX
+ 0250 E8CCFF       021F         CALL    CHKTRM          ;CHECK TERMINATOR
+ 0253 59                        POP     CX
+ 0254 74F2         0248         JZ      FILLSP          ;GET TERMINATOR SO END
+ 0256 43                        INC     BX
+ 0257 3C2A                      CMP     AL,'*'
+ 0259 7504         025F         JNZ     GTONBN          ;NORMAL CODE
+ 025B B03F                      MOV     AL,'?'          ;WILD CARD
+ 025D EB01         0260         JMPS    GTONBG
+                        ;
+                        GTONBN:                         ;NORMAL CODE
+ 025F 46                        INC     SI
+                        GTONBG:
+ 0260 8807                      MOV     [BX],AL         ;SET CODE
+ 0262 E2EB         024F         LOOP    GTONBK
+                        GTONBF:                         ;OVER COUNT CODE PASS READ
+ 0264 E8B8FF       021F         CALL    CHKTRM
+ 0267 7403         026C         JZ      GTONBE          ;GET TERMINATOR
+ 0269 46                        INC     SI
+ 026A EBF8         0264         JMPS    GTONBF          ;TO NEXT
+                        ;
+                        GTONBE:
+ 026C C3                        RET
+                        ;
+                        ;  GET FILE NAME
+                        ;  OUTPUT
+                        ;  AH:WILD CARD COUNT  -1 ERROR
+                        ;  ZF:ON NO WILD CARD
+                        ;
+                        GTFNAM:                         ;READ NORMAL
+ 026D B80000                    MOV     AX,0
+                        GTFNAS:
+ 0270 BB2708                    MOV     BX,OFFSET WKFCB
+ 0273 03D8                      ADD     BX,AX           ;GET FCB TOP
+ 0275 53                        PUSH    BX
+ 0276 C6063A0900                MOV     TDRVNU,0        ;CLEAR TEMPORARY DRIVE
+ 027B 8B363509                  MOV     SI,PNTCMD       ;GET COMMAND POINTER
+ 027F E8B7FF       0239         CALL    SRCHTP          ;GET TOP
+ 0282 89363709                  MOV     TPNCMD,SI       ;SAVE TEMPORARY TOP FOR RECOVER
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  11
+
+
+ 0286 7408         0290         JZ      GTFNAC          ;END OF DATA
+ 0288 1C40                      SBB     AL,'A'-1
+ 028A 807C013A                  CMP     BYTE PTR 1[SI],':'
+ 028E 7405         0295         JZ      GTFNAT          ;WITH DRIVE CODE
+                        GTFNAC:                         ;NO DRIVE SPECIFICATION
+ 0290 A03909                    MOV     AL,CURDRV
+ 0293 EB12         02A7         JMPS    GTFNAN
+                        ;
+                        GTFNAT:                         ;WITH DRIVE CODE
+ 0295 3C10                      CMP     AL,16
+ 0297 7704         029D         JA      GTFNAR          ;OVER
+ 0299 3C00                      CMP     AL,0
+ 029B 7705         02A2         JA      GTFNAD          ;OK IN RANGE
+                        GTFNAR:                         ;DRIVE NUMBER MISS
+ 029D B4FF                      MOV     AH,0FFH
+ 029F 5B                        POP     BX
+ 02A0 EB39         02DB         JMPS    GTFNAE
+                        ;
+                        GTFNAD:                         ;WITH DRIVE CODE
+ 02A2 A23A09                    MOV     TDRVNU,AL       ;SET DRIVE
+ 02A5 46                        INC     SI
+ 02A6 46                        INC     SI
+                        GTFNAN:
+ 02A7 8807                      MOV     [BX],AL         ;SET DRIVE CODE
+ 02A9 B90800                    MOV     CX,8
+ 02AC E8A0FF       024F         CALL    GTONBK          ;GET FILE NAME
+ 02AF B90300                    MOV     CX,3
+ 02B2 3C2E                      CMP     AL,'.'
+ 02B4 7501         02B7         JNZ     $+3             ;NOT AVAILABLE TERMINATOR
+ 02B6 46                        INC     SI
+ 02B7 E895FF       024F         CALL    GTONBK          ;GET FILE TYPE
+ 02BA 43                        INC     BX
+ 02BB 8BFB                      MOV     DI,BX
+ 02BD 8BC1                      MOV     AX,CX
+ 02BF B90300                    MOV     CX,3
+ 02C2 FC                        CLD
+ 02C3 33C0                      XOR     AX,AX
+ 02C5 F3AA                      REP     STOSB           ;CLEAR EXTENT & RECORD COUNT
+ 02C7 89363509                  MOV     PNTCMD,SI       ;SET NEXT POINT TO COMMAND POINTER
+ 02CB 5B                        POP     BX
+ 02CC B90B00                    MOV     CX,11           ;FILE NAME LENGTH
+                        GTFNAW:                         ;CHECK WILD CARD
+ 02CF 43                        INC     BX
+ 02D0 803F3F                    CMP     BYTE PTR [BX],'?'
+ 02D3 7502         02D7         JNZ     $+4
+ 02D5 FEC4                      INC     AH              ;WILD CARD
+ 02D7 E2F6         02CF         LOOP    GTFNAW
+ 02D9 8A04                      MOV     AL,[SI]         ;GET NEXT CODE
+                        GTFNAE:
+ 02DB 0AE4                      OR      AH,AH           ;SET FLAG BY WILD CARD COUNT
+ 02DD C3                        RET
+                        ;
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  12
+
+
+                        ;  CHECK RESIDENT COMMAND
+                        ;  OUTPUT
+                        ;  AX:CODE  1-6 RESIDENT COMMAND 7 NOT FOUND
+                        ;
+                        CKRSCM:
+ 02DE BF4409                    MOV     DI,OFFSET IXRSCM
+ 02E1 BB0600                    MOV     BX,6            ;COUNT OF COMMAND
+                        CKRSCL:
+ 02E4 BE2808                    MOV     SI,OFFSET WKFCB+1
+ 02E7 B90400                    MOV     CX,4            ;COMPARE LENGTH
+ 02EA F3A6                      REPZ    CMPSB
+ 02EC 7408         02F6         JZ      CKRSCG          ;OK GET
+ 02EE 03F9                      ADD     DI,CX           ;FAIL TO NEXT
+ 02F0 4B                        DEC     BX
+ 02F1 75F1         02E4         JNZ     CKRSCL
+                        CKRSCE:                         ;NOT FOUND END
+ 02F3 B007                      MOV     AL,7            ;NOT FOUND CODE      AX IS BETTER
+ 02F5 C3                        RET
+                        ;
+                        CKRSCG:                         ;MATCH FIRST 4 BYTES
+ 02F6 8A04                      MOV     AL,[SI]
+ 02F8 3C20                      CMP     AL,' '
+ 02FA 75F7         02F3         JNZ     CKRSCE          ;ERROR NET CODE MUST BE SPACE
+ 02FC 8BC3                      MOV     AX,BX           ;OK SET NUMBER
+ 02FE C3                        RET
+                        ;
+                        ;  SET DMA ADDRESS TO R/W WORK
+                        ;
+                        STWKDM:
+ 02FF 8CCA                      MOV     DX,CS
+ 0301 E8DBFE       01DF         CALL    STDMAS          ;SET DMA SEGMENT
+ 0304 BA4B08                    MOV     DX,OFFSET RWBUFF
+ 0307 E8E3FE       01ED         CALL    STDMAO          ;SET OFFSET
+ 030A C3                        RET
+                        ;
+                        ;  CCP MAIN
+                        ;
+                        ;  HOT START
+                        ;
+                        CCPHOT:
+ 030B C70635090B00              MOV     PNTCMD,OFFSET CMBUFF+2 ;SET COMMAND POINTER
+ 0311 2E803E0B0003              CMP     CMBUFF+2,3      ;CTRL-C
+ 0317 7506         031F         JNZ     CCPHOC          ;COMMAND BUFFER IS ACTIVE
+ 0319 2EC6060A0000              MOV     CMBUFF+1,0      ;COMMAND BUFFER CANCELED
+                        CCPHOC:
+ 031F BC3009                    MOV     SP,OFFSET STACK
+ 0322 E83E01       0463         CALL    STDRUC          ;SET USER CODE & DRIVE
+ 0325 EB2C         0353         JMPS    CCPLOE
+                        ;
+                        ;
+                        CCPABE:                         ;ABORT ENTRY
+ 0327 2EC6060A0000              MOV     CMBUFF+1,0
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  13
+
+
+                        ;
+                        ;  COLD START
+                        ;  INPUT
+                        ;  CL:USER CODE & DRIVE
+                        ;
+                        CCPCLD:
+ 032D BC3009                    MOV     SP,OFFSET STACK
+ 0330 51                        PUSH    CX
+ 0331 8AC1                      MOV     AL,CL
+ 0333 B104                      MOV     CL,4
+ 0335 D2D8                      RCR     AL,CL
+ 0337 240F                      AND     AL,00FH         ;GET USER CODE
+ 0339 8AD0                      MOV     DL,AL
+ 033B A2CE08                    MOV     USRCOD,AL
+ 033E E8EFFD       0130         CALL    GETUSS          ;SET USER CODE
+ 0341 E892FD       00D6         CALL    INBDOS
+ 0344 A20508                    MOV     MDSUBE,AL       ;SAVE SUBMIT MODE
+ 0347 E888FD       00D2         CALL    MEMFRE          ;FREE ALL MEMORY
+ 034A 58                        POP     AX
+ 034B 240F                      AND     AL,0FH
+ 034D A23909                    MOV     CURDRV,AL       ;DRIVE
+ 0350 E887FD       00DA         CALL    SELDRV          ;SET DRIVE
+                        CCPLOE:
+ 0353 E8A9FF       02FF         CALL    STWKDM          ;SET DMA ADDRESS TO WORK
+ 0356 2E803E0A0000              CMP     CMBUFF+1,0
+ 035C 751A         0378         JNZ     CCPLOS          ;SOME DATA
+                        ;
+                        ;  LOOP OF CCP
+                        ;
+                        CCPLOP:
+ 035E FC                        CLD
+ 035F BC3009                    MOV     SP,OFFSET STACK
+ 0362 E841FD       00A6         CALL    CRLF
+ 0365 E873FE       01DB         CALL    GTDRVN          ;GET CURRENT DRIVE
+ 0368 0441                      ADD     AL,'A'
+ 036A E82BFD       0098         CALL    CONOUT
+ 036D B03E                      MOV     AL,'>'
+ 036F E826FD       0098         CALL    CONOUT          ;X>  OUT PROMPT
+ 0372 E88AFF       02FF         CALL    STWKDM          ;SET DMA ADDRESS
+ 0375 E8C8FD       0140         CALL    RDCOMN          ;READ COMMAND
+                        CCPLOS:
+ 0378 FC                        CLD
+ 0379 E85FFE       01DB         CALL    GTDRVN          ;GET DRIVE
+ 037C A23909                    MOV     CURDRV,AL       ;SAVE CURRENT DRIVE
+ 037F 2E803E0B003B              CMP     CMBUFF+2,';'
+ 0385 74D7         035E         JZ      CCPLOP          ;COMMENT LINE TO NEXT
+ 0387 8B363509                  MOV     SI,PNTCMD       ;GET COMMAND POINT
+ 038B E8ABFE       0239         CALL    SRCHTP          ;TO TOP OF CODE
+ 038E 74CE         035E         JZ      CCPLOP          ;NO CODE
+ 0390 E8DAFE       026D         CALL    GTFNAM          ;GET COMMAND
+ 0393 752B         03C0         JNZ     COMERR          ;WILD CARD IS ERROR
+ 0395 F6063A09FF                TEST    TDRVNU,0FFH
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  14
+
+
+ 039A 7403         039F         JZ      $+5             ;CHECK RESIDENT COMMAND
+ 039C E94503       06E4         JMP     TRCDSL          ;NOT RESIDENT COMMAND AS SOME DRIVE SPECIFIED
+                        ;
+ 039F 803E280820                CMP     WKFCB+1,' '
+ 03A4 741A         03C0         JZ      COMERR          ;NO CODE SO ERROR
+ 03A6 E835FF       02DE         CALL    CKRSCM          ;CHECK RESIDENT COMMAND
+ 03A9 48                        DEC     AX
+ 03AA BBE209                    MOV     BX,OFFSET IXRSRT
+ 03AD 03D8                      ADD     BX,AX
+ 03AF 03D8                      ADD     BX,AX
+ 03B1 8B17                      MOV     DX,[BX]         ;GET ROUTINE
+ 03B3 FFE2                      JMP     DX              ;TO EACH ROUTINE
+                        ;
+                        ;  READ ERROR
+                        ;
+                        REDERR:
+ 03B5 B99009                    MOV     CX,OFFSET CRDERR
+ 03B8 EB03         03BD         JMPS    FNFERS
+                        ;
+                        ;  FILE NOT FOUND
+                        ;
+                        FNFERR:
+ 03BA B95C09                    MOV     CX,OFFSET CNOFIL
+                        FNFERS:
+ 03BD E9EFFC       00AF         JMP     BUFPRN
+                        ;
+                        ;  COMMAND ERROR
+                        ;
+                        COMERR:
+ 03C0 E8E3FC       00A6         CALL    CRLF
+ 03C3 8B1E3709                  MOV     BX,TPNCMD       ;CURRENT PROCESSED COMMAND TOP
+                        COMERL:
+ 03C7 8A07                      MOV     AL,[BX]
+ 03C9 3C20                      CMP     AL,' '
+ 03CB 740C         03D9         JZ      COMERE          ;END OF BLOCK
+ 03CD 0AC0                      OR      AL,AL
+ 03CF 7408         03D9         JZ      COMERE
+ 03D1 53                        PUSH    BX
+ 03D2 E8C3FC       0098         CALL    CONOUT          ;OUT COMMAND LINE
+ 03D5 5B                        POP     BX
+ 03D6 43                        INC     BX
+ 03D7 EBEE         03C7         JMPS    COMERL
+                        ;
+                        COMERE:
+ 03D9 B03F                      MOV     AL,'?'
+ 03DB E8BAFC       0098         CALL    CONOUT
+ 03DE E8C5FC       00A6         CALL    CRLF
+ 03E1 2EC6060A0000              MOV     CMBUFF+1,0      ;CANCEL CURRENT COMMAND LINE
+ 03E7 E974FF       035E         JMP     CCPLOP
+                        ;
+                        ;  GET DECIMAL NUMBER
+                        ;  OUTPUT
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  15
+
+
+                        ;  AL:NUMBER BY BINARY          NO DATA 21H
+                        ;
+                        GTDNUM:
+ 03EA E880FE       026D         CALL    GTFNAM          ;GET BLOCK
+ 03ED F6063A09FF                TEST    TDRVNU,0FFH
+ 03F2 75CC         03C0         JNZ     COMERR          ;CANNOT HAVE DRIVE NAME
+ 03F4 BB2808                    MOV     BX,OFFSET WKFCB+1
+ 03F7 B90B00                    MOV     CX,11           ;CODE MAX LENGTH & DATA 0
+ 03FA 803F20                    CMP     BYTE PTR [BX],' '
+ 03FD 7503         0402         JNZ     GTDNUL          ;SOME CODE
+ 03FF B021                      MOV     AL,021H         ;NO CODE
+ 0401 C3                        RET
+                        ;
+                        GTDNUL:
+ 0402 8A07                      MOV     AL,[BX]
+ 0404 3C20                      CMP     AL,' '
+ 0406 7427         042F         JZ      GTDNUE          ;END OF CODE
+ 0408 43                        INC     BX
+ 0409 2C30                      SUB     AL,'0'
+ 040B 3C0A                      CMP     AL,10
+ 040D 73B1         03C0         JNC     COMERR          ;ILLEGAL CHARACTER
+ 040F 8AF0                      MOV     DH,AL
+ 0411 F6C5E0                    TEST    CH,0E0H
+ 0414 75AA         03C0         JNZ     COMERR          ;OVERFLOW
+ 0416 8AC5                      MOV     AL,CH
+ 0418 B103                      MOV     CL,3
+ 041A D2C0                      ROL     AL,CL           ;*8
+ 041C 02C5                      ADD     AL,CH           ;*9
+ 041E 72A0         03C0         JC      COMERR          ;OVER
+ 0420 02C5                      ADD     AL,CH           ;*10
+ 0422 729C         03C0         JC      COMERR          ;OVER
+ 0424 02C6                      ADD     AL,DH
+ 0426 7298         03C0         JC      COMERR          ;OVER
+ 0428 8AE8                      MOV     CH,AL           ;TO NEXT
+ 042A FEC9                      DEC     CL
+ 042C 75D4         0402         JNZ     GTDNUL
+ 042E C3                        RET                     ;LENGTH FULL
+                        ;
+                        GTDNUE:
+ 042F 803F20                    CMP     BYTE PTR [BX],' '
+ 0432 758C         03C0         JNZ     COMERR          ;END FORM ERROR
+ 0434 43                        INC     BX
+ 0435 FEC9                      DEC     CL
+ 0437 75F6         042F         JNZ     GTDNUE
+ 0439 8AC5                      MOV     AL,CH
+ 043B C3                        RET
+                        ;
+                        ;  COPY DATA
+                        ;  INPUT
+                        ;  DI:DESTINATION POINTER
+                        ;  SI:SOURCE POINTER
+                        ;  CX:LENGTH COUNT
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  16
+
+
+                        ;
+                        COPY:
+ 043C FC                        CLD
+ 043D F3A4                      REP     MOVSB
+ 043F C3                        RET
+                        ;
+                        ;  GET DIRECTORY TOP
+                        ;  INPUT
+                        ;  AL:BIAS 1
+                        ;  CL:BIAS 2
+                        ;
+                        GTDRTP:
+ 0440 BB4B08                    MOV     BX,OFFSET RWBUFF
+ 0443 B400                      MOV     AH,0
+ 0445 02C1                      ADD     AL,CL
+ 0447 03D8                      ADD     BX,AX
+ 0449 8A07                      MOV     AL,[BX]         ;GET CODE
+ 044B C3                        RET
+                        ;
+                        ;  SELECT TARGET DRIVE
+                        ;
+                        SLTGDR:
+ 044C C606270800                MOV     WKFCB,0
+ 0451 A03A09                    MOV     AL,TDRVNU
+ 0454 0AC0                      OR      AL,AL
+ 0456 7424         047C         JZ      SLCRDE          ;DEFAULT
+ 0458 FEC8                      DEC     AL
+ 045A BB3909                    MOV     BX,OFFSET CURDRV
+ 045D 3A07                      CMP     AL,[BX]         ;CHECK WITH CURRENT
+ 045F 741B         047C         JZ      SLCRDE          ;SAME
+ 0461 EB1D         0480         JMPS    SLCRDD          ;SELECT DRIVE
+                        ;
+                        ;  SET USER CODE & DRIVE
+                        ;
+                        STDRUC:
+ 0463 8A16CE08                  MOV     DL,USRCOD
+ 0467 E8C6FC       0130         CALL    GETUSS          ;SET USER CODE
+ 046A EB11         047D         JMPS    SLCRDS          ;SELECT DRIVE
+                        ;
+                        ;  SELECT TO CURRENT DRIVE
+                        ;
+                        SLCRDR:
+ 046C A03A09                    MOV     AL,TDRVNU
+ 046F 0AC0                      OR      AL,AL
+ 0471 7409         047C         JZ      SLCRDE          ;CURRENT DRIVE
+ 0473 FEC8                      DEC     AL
+ 0475 BB3909                    MOV     BX,OFFSET CURDRV
+ 0478 3A07                      CMP     AL,[BX]
+ 047A 7501         047D         JNZ     SLCRDS          ;NOT SAME DRIVE
+                        SLCRDE:
+ 047C C3                        RET
+                        ;
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  17
+
+
+                        SLCRDS:                         ;SELECT TO CURRENT DRIVE
+ 047D A03909                    MOV     AL,CURDRV
+                        SLCRDD:
+ 0480 E957FC       00DA         JMP     SELDRV
+                        ;
+                        ;  DIRS:DIRECTORY OUT OF SYSTEM FILE
+                        ;
+                        DIRSYS:
+ 0483 C606F10901                MOV     MODDIR,1        ;TO SYSTEM FILE MODE
+ 0488 E82700       04B2         CALL    DIROUT          ;DIRECTORY OUT BODDY
+ 048B 803EF00900                CMP     MODIRE,0
+ 0490 7406         0498         JZ      DIRSYE          ;NO NON-SYSTEM FILE
+ 0492 B9AA09                    MOV     CX,OFFSET CNSYSF
+ 0495 E817FC       00AF         CALL    BUFPRN          ;WITH NON-SYSTEM FILE
+                        DIRSYE:
+ 0498 EB15         04AF         JMPS    DIRNOE
+                        ;
+                        ;  DIR:DIRECTORY OUT OF NON-SYSTEM FILE
+                        ;
+                        DIRNON:
+ 049A C606F10900                MOV     MODDIR,0        ;TO NON-SYSTEM FILE MODE
+ 049F E81000       04B2         CALL    DIROUT
+ 04A2 803EF00900                CMP     MODIRE,0
+ 04A7 7406         04AF         JZ      DIRNOE          ;NO SYSTEM FILE
+ 04A9 B9C509                    MOV     CX,OFFSET CSYSFL
+ 04AC E800FC       00AF         CALL    BUFPRN          ;WITH SYSTEM FILE
+                        DIRNOE:
+ 04AF E92F03       07E1         JMP     ENCPRC
+                        ;
+                        ;  DIRECTORY OUT BODDY
+                        ;
+                        DIROUT:
+ 04B2 2EC6060A0000              MOV     CMBUFF+1,0      ;CLEAR COMMAND COUNT
+ 04B8 C606F00900                MOV     MODIRE,0        ;CLEAR UNVISIBLE DIRECTORY EXIST MODE
+ 04BD E8ADFD       026D         CALL    GTFNAM          ;GET FILE NAME
+ 04C0 80FCFF                    CMP     AH,0FFH
+ 04C3 7503         04C8         JNZ     DIROUG          ;OK GET SOME NAME
+ 04C5 E9F8FE       03C0         JMP     COMERR          ;FILE NAME ERROR
+                        ;
+                        DIROUG:
+ 04C8 E881FF       044C         CALL    SLTGDR          ;TO TARGET DRIVE
+ 04CB BB2808                    MOV     BX,OFFSET WKFCB+1
+ 04CE 803F20                    CMP     BYTE PTR [BX],' '
+ 04D1 750A         04DD         JNZ     DIROUS          ;EXIST SOME FILE NAME
+ 04D3 B50B                      MOV     CH,11
+                        DIROUW:                         ;FILL WILD CARD
+ 04D5 C6073F                    MOV     BYTE PTR [BX],'?'
+ 04D8 43                        INC     BX
+ 04D9 FECD                      DEC     CH
+ 04DB 75F8         04D5         JNZ     DIROUW
+                        DIROUS:
+ 04DD B200                      MOV     DL,0            ;CLEAR POSITION COUNT
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  18
+
+
+ 04DF 52                        PUSH    DX
+ 04E0 E829FC       010C         CALL    SEARCW          ;SEARCH FIRST
+ 04E3 7503         04E8         JNZ     DIROUL          ;GET FIRST
+ 04E5 E8D2FE       03BA         CALL    FNFERR          ;NOT FOUND END
+                        DIROUL:                         ;ONE DIRECTORY OUT LOOP
+ 04E8 7503         04ED         JNZ     DIROUO          ;GET FILE
+ 04EA E99B00       0588         JMP     DIROUE          ;END OF DIRECTORY
+                        ;
+                        DIROUO:                         ;GET FILE
+ 04ED A0CD08                    MOV     AL,BSDIRC
+ 04F0 B103                      MOV     CL,3
+ 04F2 D2C8                      ROR     AL,CL           ;GET BIAS TO DIRECTORY DATA
+ 04F4 8AC8                      MOV     CL,AL
+ 04F6 B00A                      MOV     AL,10
+ 04F8 E845FF       0440         CALL    GTDRTP          ;GET SYSTEM FILE MODE BYTE
+ 04FB D0D0                      RCL     AL,1
+ 04FD 730E         050D         JNC     DIRONS          ;NON-SYSTEM FILE
+ 04FF F606F109FF                TEST    MODDIR,0FFH     ;SYSTEM FILE
+ 0504 7515         051B         JNZ     DIROUD          ;SYSTEM FILE  OUT MODE
+ 0506 C606F00901                MOV     MODIRE,1        ;NOT OUT MODE SO SET FLAG
+ 050B EB70         057D         JMPS    DIRONO
+                        ;
+                        DIRONS:                         ;NON-SYSTEM FILE
+ 050D F606F109FF                TEST    MODDIR,0FFH
+ 0512 7407         051B         JZ      DIROUD          ;NON-SYSTEM FILE OUT MODE
+ 0514 C606F00901                MOV     MODIRE,1        ;NOT OUT MODE SET FLAG
+ 0519 EB62         057D         JMPS    DIRONO
+                        ;
+                        DIROUD:                         ;OUT FILE NAME
+ 051B 5A                        POP     DX
+ 051C 8AC2                      MOV     AL,DL
+ 051E FEC2                      INC     DL              ;UP DISPLAY POSITION COUNT
+ 0520 52                        PUSH    DX
+ 0521 E91C05       0A40         JMP     DIRPAT          ;GET DISPLAY WIDTH MODE
+                        ;
+                        DIROUP:
+ 0524 2403                      AND     AL,3            ;GET POSITION
+ 0526 50                        PUSH    AX
+ 0527 7514         053D         JNZ     DIRONP          ;NOT LINE TOP
+ 0529 E87AFB       00A6         CALL    CRLF            ;LINE TOP
+ 052C 51                        PUSH    CX
+ 052D E8ABFC       01DB         CALL    GTDRVN
+ 0530 59                        POP     CX
+ 0531 0441                      ADD     AL,'A'
+ 0533 E86AFB       00A0         CALL    CONOTB          ;OUT DRIVE NAME
+ 0536 B03A                      MOV     AL,':'
+ 0538 E865FB       00A0         CALL    CONOTB
+ 053B EB08         0545         JMPS    DIRONN
+                        ;
+                        DIRONP:                         ;NOT LINE TOP
+ 053D E85EFB       009E         CALL    SPACE
+ 0540 B03A                      MOV     AL,':'
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  19
+
+
+ 0542 E85BFB       00A0         CALL    CONOTB
+                        DIRONN:
+ 0545 E856FB       009E         CALL    SPACE
+ 0548 B501                      MOV     CH,1            ;CHARACTER COUNT
+                        DIRONL:
+ 054A 8AC5                      MOV     AL,CH
+ 054C E8F1FE       0440         CALL    GTDRTP          ;GET DATA
+ 054F 247F                      AND     AL,07FH
+ 0551 3C20                      CMP     AL,' '
+ 0553 7513         0568         JNZ     DIROON          ;EXIST CODE
+ 0555 58                        POP     AX
+ 0556 50                        PUSH    AX
+ 0557 3C03                      CMP     AL,3
+ 0559 750B         0566         JNZ     DIROSP          ;NOT END POSITION
+ 055B B009                      MOV     AL,9
+ 055D E8E0FE       0440         CALL    GTDRTP          ;GET TYPE
+ 0560 247F                      AND     AL,07FH
+ 0562 3C20                      CMP     AL,' '
+ 0564 7416         057C         JZ      DIRONX          ;TO LINE END
+                        DIROSP:                         ;OUT SPACE
+ 0566 B020                      MOV     AL,' '
+                        DIROON:
+ 0568 E835FB       00A0         CALL    CONOTB          ;OUT CODE
+ 056B FEC5                      INC     CH
+ 056D 80FD0C                    CMP     CH,12
+ 0570 730A         057C         JNC     DIRONX          ;ALL CODE END
+ 0572 80FD09                    CMP     CH,9
+ 0575 75D3         054A         JNZ     DIRONL
+ 0577 E824FB       009E         CALL    SPACE           ;NAME TO TYPE
+ 057A EBCE         054A         JMPS    DIRONL
+                        ;
+                        DIRONX:                         ;END OF ONE FILE NAME OUT
+ 057C 58                        POP     AX
+                        DIRONO:
+ 057D E849FC       01C9         CALL    CHKCIT          ;CHECK CONSOLE INTERRUPT
+ 0580 7506         0588         JNZ     DIROUE          ;INTERRUPTED
+ 0582 E883FB       0108         CALL    SEARCN          ;TO NEXT
+ 0585 E960FF       04E8         JMP     DIROUL
+                        ;
+                        DIROUE:                         ;DIRECTORY OUT END
+ 0588 5A                        POP     DX
+ 0589 C3                        RET
+                        ;
+                        ;  ERA:ERASE FILE
+                        ;
+                        ERASE:
+ 058A 2EC6060A0000              MOV     CMBUFF+1,0      ;CLEAR COMMAND COUNTER
+ 0590 E8DAFC       026D         CALL    GTFNAM          ;GET FILE NAME
+ 0593 80FC0B                    CMP     AH,11
+ 0596 7521         05B9         JNZ     ERASES          ;NOT ALL ERASE
+ 0598 B96409                    MOV     CX,OFFSET CALLOK
+ 059B E811FB       00AF         CALL    BUFPRN          ;ALL ERASE
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  20
+
+
+ 059E E89FFB       0140         CALL    RDCOMN          ;CHECK ERASE OK
+ 05A1 BB0A00                    MOV     BX,OFFSET CMBUFF+1
+ 05A4 FE0F                      DEC     BYTE PTR [BX]
+ 05A6 7403         05AB         JZ      ERASEA          ;RESPONSE LENGTH OK
+ 05A8 E9B3FD       035E         JMP     CCPLOP          ;RESPONSE IS NOT SUITABLE
+                        ;
+                        ERASEA:
+ 05AB 43                        INC     BX
+ 05AC 803F59                    CMP     BYTE PTR [BX],'Y'
+ 05AF 7403         05B4         JZ      ERASEO          ;OK ERASE
+ 05B1 E9AAFD       035E         JMP     CCPLOP          ;CANCEL
+                        ;
+                        ERASEO:                         ;ERASE
+ 05B4 43                        INC     BX
+ 05B5 891E3509                  MOV     PNTCMD,BX       ;SET COMMAND POINTER
+                        ERASES:
+ 05B9 803E280820                CMP     WKFCB+1,' '
+ 05BE 7467         0627         JZ      TYPERR          ;NO FILE SPECIFICATION
+ 05C0 E889FE       044C         CALL    SLTGDR          ;TO TARGET DRIVE
+ 05C3 BA2708                    MOV     DX,OFFSET WKFCB
+ 05C6 E848FB       0111         CALL    DELETF          ;DELETE
+ 05C9 FEC0                      INC     AL
+ 05CB 7503         05D0         JNZ     ERASEN          ;OK ERASED
+                        ERASNF:                         ;NOT FOUND
+ 05CD E8EAFD       03BA         CALL    FNFERR
+                        ERASEN:
+ 05D0 EB4C         061E         JMPS    TYPEOF
+                        ;
+                        ;  TYPE:TYPE OUT FILE
+                        ;
+                        TYPEOT:
+ 05D2 2EC6060A0000              MOV     CMBUFF+1,0      ;CLEAR COMMAND LENGTH
+ 05D8 E892FC       026D         CALL    GTFNAM          ;GET FILE NAME
+ 05DB 754A         0627         JNZ     TYPERR          ;CANNOT HAVE WILD CARD
+ 05DD 803E280820                CMP     WKFCB+1,' '
+ 05E2 7443         0627         JZ      TYPERR          ;NO FILE NAME
+ 05E4 E865FE       044C         CALL    SLTGDR          ;TO TARGET DRIVE
+ 05E7 E803FB       00ED         CALL    OPENW           ;OPEN
+ 05EA 74E1         05CD         JZ      ERASNF          ;NOT FOUND
+ 05EC E8B7FA       00A6         CALL    CRLF
+ 05EF BBFF00                    MOV     BX,255          ;DUMMY FOR READ FIRST SECTOR
+                        TYPEOL:                         ;ONE BYTE OUT LOOP
+ 05F2 81FB8000                  CMP     BX,SCTLNG
+ 05F6 720A         0602         JC      TYPEOS          ;NOT SECTOR BOUNDARY
+ 05F8 53                        PUSH    BX              ;TO NEXT SECTOR
+ 05F9 E823FB       011F         CALL    READNW          ;GET ONE SECTOR
+ 05FC 5B                        POP     BX
+ 05FD 751B         061A         JNZ     TYPEOE          ;END OR ERROR
+ 05FF BB0000                    MOV     BX,0
+                        TYPEOS:
+ 0602 43                        INC     BX
+ 0603 BE4A08                    MOV     SI,OFFSET RWBUFF-1
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  21
+
+
+ 0606 03F3                      ADD     SI,BX           ;GET DATA POINT
+ 0608 8A04                      MOV     AL,[SI]
+ 060A 3C1A                      CMP     AL,EOF
+ 060C 7410         061E         JZ      TYPEOF          ;END OF FILE
+ 060E 53                        PUSH    BX
+ 060F E886FA       0098         CALL    CONOUT          ;OUT CODE
+ 0612 E8B4FB       01C9         CALL    CHKCIT          ;CHECK CONSOLE INTERRUPT
+ 0615 5B                        POP     BX
+ 0616 7506         061E         JNZ     TYPEOF          ;INTERRUPTED END
+ 0618 EBD8         05F2         JMPS    TYPEOL          ;TO NEXT CHARATCTER
+                        ;
+                        TYPEOE:                         ;END OR ERROR
+ 061A FEC8                      DEC     AL
+ 061C 7503         0621         JNZ     TYPEOR          ;READ ERROR
+                        TYPEOF:                         ;END OF COMMAND
+ 061E E9C001       07E1         JMP     ENCPRC
+                        ;
+                        TYPEOR:                         ;READ ERROR
+ 0621 E891FD       03B5         CALL    REDERR
+ 0624 E845FE       046C         CALL    SLCRDR          ;TO CURRENT DRIVE
+                        TYPERR:                         ;ERROR
+ 0627 E996FD       03C0         JMP     COMERR
+                        ;
+                        ;  REN:RENAME FILE
+                        ;
+                        RENAMP:
+ 062A 2EC6060A0000              MOV     CMBUFF+1,0      ;CLEAR COMMAND COUNT
+ 0630 E83AFC       026D         CALL    GTFNAM          ;GET NEW FILE NAME
+ 0633 75F2         0627         JNZ     TYPERR          ;CANNOT HAVE WILD CARD
+ 0635 A03A09                    MOV     AL,TDRVNU
+ 0638 50                        PUSH    AX              ;SAVE DRIVE
+ 0639 E810FE       044C         CALL    SLTGDR          ;TO TARGET DRIVE
+ 063C E8CDFA       010C         CALL    SEARCW          ;SEARCH
+ 063F 7402         0643         JZ      RENAMS          ;NOT FOUND OK
+ 0641 EB55         0698         JMPS    RENADP          ;DUPLICATE FILE ERROR
+                        ;
+                        RENAMS:
+ 0643 BE2708                    MOV     SI,OFFSET WKFCB
+ 0646 BF3708                    MOV     DI,OFFSET WKFCB+16
+ 0649 B91000                    MOV     CX,16
+ 064C E8EDFD       043C         CALL    COPY            ;SET TO NEW NAME POSITION
+ 064F 8B363509                  MOV     SI,PNTCMD
+ 0653 E8E3FB       0239         CALL    SRCHTP          ;GET NEXT TOP
+ 0656 3C3D                      CMP     AL,'='
+ 0658 7404         065E         JZ      RENAMF          ;TERMINATOR OK
+ 065A 3C5F                      CMP     AL,'_'
+ 065C 7535         0693         JNZ     RENAER          ;TERMINATOR ERROR
+                        RENAMF:
+ 065E 46                        INC     SI
+ 065F 89363509                  MOV     PNTCMD,SI
+ 0663 E807FC       026D         CALL    GTFNAM          ;GET OLD FILE NAME
+ 0666 752B         0693         JNZ     RENAER          ;CANNOT HAVE WILD CARD
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  22
+
+
+ 0668 58                        POP     AX
+ 0669 8AE8                      MOV     CH,AL
+ 066B BB3A09                    MOV     BX,OFFSET TDRVNU
+ 066E 8A07                      MOV     AL,[BX]
+ 0670 0AC0                      OR      AL,AL
+ 0672 7406         067A         JZ      RENAMK          ;NO DRIVE SPECIFICATION
+ 0674 3AC5                      CMP     AL,CH
+ 0676 882F                      MOV     [BX],CH
+ 0678 7519         0693         JNZ     RENAER          ;DIFFERENT DRIVE IS ERROR
+                        RENAMK:
+ 067A 882F                      MOV     [BX],CH
+ 067C C606270800                MOV     WKFCB,0         ;CLEAR DRIVE CODE
+ 0681 E888FA       010C         CALL    SEARCW
+ 0684 7408         068E         JZ      RENANF          ;OLD FILE NOT FOUND
+ 0686 BA2708                    MOV     DX,OFFSET WKFCB
+ 0689 E89EFA       012A         CALL    RENAME          ;RENAME
+                        RENAMN:
+ 068C EB90         061E         JMPS    TYPEOF
+                        ;
+                        RENANF:                         ;NOT FOUND ERROR
+ 068E E829FD       03BA         CALL    FNFERR
+ 0691 EBF9         068C         JMPS    RENAMN
+                        ;
+                        RENAER:                         ;ERROR
+ 0693 E8D6FD       046C         CALL    SLCRDR
+ 0696 EB38         06D0         JMPS    USERER
+                        ;
+                        RENADP:                         ;DUPLICATE FILE ERROR
+ 0698 B96F09                    MOV     CX,OFFSET CFLEXT
+ 069B E811FA       00AF         CALL    BUFPRN
+ 069E EBEC         068C         JMPS    RENAMN
+                        ;
+                        ;  USER:SET USER NUMBER
+                        ;
+                        USER:
+ 06A0 E847FD       03EA         CALL    GTDNUM          ;GET NUMBER
+ 06A3 3C21                      CMP     AL,021H
+ 06A5 751A         06C1         JNZ     USERST          ;SET MODE
+ 06A7 E8FCF9       00A6         CALL    CRLF            ;INTERROGATE MODE
+ 06AA E881FA       012E         CALL    GETUSR          ;GET USER CODE
+ 06AD 0C30                      OR      AL,'0'
+ 06AF 3C39                      CMP     AL,'9'
+ 06B1 7609         06BC         JBE     USEROT          ;0 TO 9
+ 06B3 50                        PUSH    AX              ;10 TO 15
+ 06B4 B031                      MOV     AL,'1'
+ 06B6 E8DFF9       0098         CALL    CONOUT
+ 06B9 58                        POP     AX
+ 06BA 2C0A                      SUB     AL,10
+                        USEROT:
+ 06BC E8D9F9       0098         CALL    CONOUT
+ 06BF EB49         070A         JMPS    TRCDSE
+                        ;
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  23
+
+
+                        USERST:                         ;SET MODE
+ 06C1 3C10                      CMP     AL,16
+ 06C3 7202         06C7         JC      USERSS          ;OK IN RANGE
+ 06C5 EB09         06D0         JMPS    USERER          ;OVER
+                        ;
+                        USERSS:
+ 06C7 8AD0                      MOV     DL,AL
+ 06C9 803E280820                CMP     WKFCB+1,' '
+ 06CE 7503         06D3         JNZ     USERSE          ;HAVE SOME NUMBER
+                        USERER:                         ;ERROR
+ 06D0 E9EDFC       03C0         JMP     COMERR
+                        ;
+                        USERSE:
+ 06D3 A2CE08                    MOV     USRCOD,AL       ;SET USER CODE
+ 06D6 E857FA       0130         CALL    GETUSS
+ 06D9 E90801       07E4         JMP     ENDPRT
+                        ;
+                        ;  MEMORY NOT AVAILABLE IN PROGRAM LOADING
+                        ;
+                        MEMNAV:
+ 06DC B97B09                    MOV     CX,OFFSET CMNAVL
+ 06DF E8CDF9       00AF         CALL    BUFPRN
+ 06E2 EBA8         068C         JMPS    RENAMN
+                        ;
+                        ;  TRANSIENT COMMAND OR CHANGE DRIVE
+                        ;
+                        TRCDSL:
+ 06E4 E827FB       020E         CALL    CHKUID          ;CHECK USER ID
+ 06E7 803E280820                CMP     WKFCB+1,' '
+ 06EC 751F         070D         JNZ     TRNCMD          ;SOME COMMAND
+ 06EE A03A09                    MOV     AL,TDRVNU       ;CHANGE DRIVE
+ 06F1 0AC0                      OR      AL,AL
+ 06F3 7415         070A         JZ      TRCDSE          ;NO DRIVE SPECIFICATION
+ 06F5 FEC8                      DEC     AL
+ 06F7 A23909                    MOV     CURDRV,AL       ;SET AS CURRENT DRIVE
+ 06FA A33109                    MOV     WORD PTR WKBIOS+1,AX
+ 06FD E8CAF9       00CA         CALL    SELDSK          ;SELECT BY DIRECT BIOS CALL
+ 0700 0BDB                      OR      BX,BX
+ 0702 74CC         06D0         JZ      USERER          ;SELECT ERROR
+ 0704 A03909                    MOV     AL,CURDRV       ;OK SELECT
+ 0707 E8D0F9       00DA         CALL    SELDRV
+                        TRCDSE:
+ 070A E9D700       07E4         JMP     ENDPRT
+                        ;
+                        ;  TRANSIENT COMMAND
+                        ;
+                        TRNCMD:
+ 070D 803E300820                CMP     WKFCB+9,' '
+ 0712 7402         0716         JZ      TRNCMK          ;OK
+ 0714 EBBA         06D0         JMPS    USERER          ;NON RESIDENT COMMAND NAME CANNOT HAVE TYPE
+                        ;
+                        TRNCMK:
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  24
+
+
+ 0716 E833FD       044C         CALL    SLTGDR          ;TO TARGET DRIVE
+ 0719 BF3008                    MOV     DI,OFFSET WKFCB+9
+ 071C BE0008                    MOV     SI,OFFSET CODCMD
+ 071F B90300                    MOV     CX,3
+ 0722 F3A4                      REP     MOVSB           ;SET 'CMD'  TYPE
+ 0724 BA2708                    MOV     DX,OFFSET WKFCB
+ 0727 E8C3F9       00ED         CALL    OPENW           ;OPEN COMMAND FILE
+ 072A 7506         0732         JNZ     TRNCMO          ;OK
+ 072C E83DFD       046C         CALL    SLCRDR          ;NOT FOUND SO COMMAND ERROR
+ 072F E98EFC       03C0         JMP     COMERR
+                        ;
+                        TRNCMO:
+ 0732 E88EF9       00C3         CALL    LOADPR          ;LOAD PROGRAM
+ 0735 40                        INC     AX
+ 0736 74A4         06DC         JZ      MEMNAV          ;TOO LARGE CANNOT LOAD IN MEMORY
+ 0738 891E0308                  MOV     DDMASG,BX       ;SAVE BASE PAGE SEGMENT  DS
+ 073C 8EC3                      MOV     ES,BX
+ 073E E82BFD       046C         CALL    SLCRDR          ;TO CURRENT DRIVE
+ 0741 8CD8                      MOV     AX,DS
+ 0743 8EC0                      MOV     ES,AX
+ 0745 E825FB       026D         CALL    GTFNAM          ;GET LEFT COMMAND FIRST FILE NAME
+ 0748 BB3A09                    MOV     BX,OFFSET TDRVNU
+ 074B 53                        PUSH    BX
+ 074C 8A07                      MOV     AL,[BX]
+ 074E A22708                    MOV     WKFCB,AL
+ 0751 B81000                    MOV     AX,16
+ 0754 E819FB       0270         CALL    GTFNAS          ;GET SECOND FILE NAME
+ 0757 5B                        POP     BX
+ 0758 8A07                      MOV     AL,[BX]
+ 075A A23708                    MOV     WKFCB+16,AL
+ 075D C606470800                MOV     WKFCB+32,0      ;CLEAR CURRENT RECORD COUNT
+ 0762 BF5C00                    MOV     DI,DFCB         ;DEFAULT FCB IN BASE PAGE
+ 0765 8E060308                  MOV     ES,DDMASG       ;BASE PAGE SEGMENT
+ 0769 BE2708                    MOV     SI,OFFSET WKFCB
+ 076C B92100                    MOV     CX,33           ;FCB LENGTH
+ 076F E8CAFC       043C         CALL    COPY            ;SET TO DEFAULT FCB
+ 0772 BE0B00                    MOV     SI,OFFSET CMBUFF+2
+ 0775 E8C1FA       0239         CALL    SRCHTP          ;GET TOP
+ 0778 0AC0                      OR      AL,AL
+ 077A 740E         078A         JZ      TRNCMS          ;NO CODE
+                        TRNCMT:
+ 077C AC                        LODSB
+ 077D 0AC0                      OR      AL,AL
+ 077F 7409         078A         JZ      TRNCMS          ;NO LEFT CODE
+ 0781 3C20                      CMP     AL,' '
+ 0783 7402         0787         JZ      TRNCMN          ;GET LEFT CODE TOP
+ 0785 EBF5         077C         JMPS    TRNCMT          ;PASS TRANSIENT COMMAND NAME
+                        ;
+                        TRNCMN:                         ;GET LEFT CODE POINT
+ 0787 E8AFFA       0239         CALL    SRCHTP
+                        TRNCMS:
+ 078A B500                      MOV     CH,0            ;LEFT CODE LENGTH COUNT
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  25
+
+
+ 078C BF8100                    MOV     DI,DFCMBF+1
+ 078F 4E                        DEC     SI
+                        TRNCMM:
+ 0790 AC                        LODSB
+ 0791 AA                        STOSB                   ;SET LEFT COMMAND CODE
+ 0792 0AC0                      OR      AL,AL
+ 0794 7404         079A         JZ      TRNCMG          ;END OF CODE
+ 0796 FEC5                      INC     CH
+ 0798 EBF6         0790         JMPS    TRNCMM          ;TO NEXT
+                        ;
+                        TRNCMG:
+ 079A 8AC5                      MOV     AL,CH
+ 079C BF8000                    MOV     DI,DFCMBF
+ 079F AA                        STOSB                   ;SET LENGTH COUNT
+ 07A0 BF0000                    MOV     DI,DFPAGE       ;BASE PAGE TOP
+ 07A3 268B4503                  MOV     AX,ES:3[DI]     ;GET CODE SEGMENT
+ 07A7 2EA3FB07                  MOV     CMDPTR+2,AX
+ 07AB 268A4505                  MOV     AL,ES:5[DI]     ;GET ENTRY OFFSET  XX00H
+ 07AF 2EA2FA07                  MOV     BYTE PTR CMDPTR+1,AL
+ 07B3 E8F0F8       00A6         CALL    CRLF
+ 07B6 E82AFA       01E3         CALL    STDMAA          ;SET DEFAULT DMA ADDRESS
+ 07B9 C606CF0800                MOV     TRCMOD,0        ;                               NOT USED  ????
+ 07BE 2EC6060A0000              MOV     CMBUFF+1,0      ;CLEAR COMMAND COUNT
+ 07C4 8E060308                  MOV     ES,DDMASG
+ 07C8 8E1E0308                  MOV     DS,DDMASG
+ 07CC BB0F00                    MOV     BX,DFESSG
+ 07CF 833F00                    CMP     WORD PTR [BX],0
+ 07D2 7402         07D6         JZ      $+4             ;8080 MODEL OR SMALL MODEL
+ 07D4 8E07                      MOV     ES,[BX]         ;COMPACT MODEL
+ 07D6 2EFF1EF907                CALLF   DWORD PTR CMDPTR ;TO COMMAND ROUTINE
+ 07DB BC3009                    MOV     SP,OFFSET STACK
+ 07DE E9B1F8       0092         JMP     SYSRST          ;END OF COMMAND
+                        ;
+                        ;  CCP COMMAND END PROCESS
+                        ;
+                        ENCPRC:
+ 07E1 E888FC       046C         CALL    SLCRDR          ;TO CURRENT DRIVE
+                        ENDPRT:
+ 07E4 E886FA       026D         CALL    GTFNAM          ;CHECK LEFT CODE
+ 07E7 A02808                    MOV     AL,WKFCB+1
+ 07EA 2C20                      SUB     AL,' '
+ 07EC BB3A09                    MOV     BX,OFFSET TDRVNU
+ 07EF 0A07                      OR      AL,[BX]
+ 07F1 7503         07F6         JNZ     ENDPRE          ;SOME CODE LEFT SO ERROR
+ 07F3 E968FB       035E         JMP     CCPLOP          ;OK END
+                        ;
+                        ENDPRE:
+ 07F6 E9C7FB       03C0         JMP     COMERR
+                        ;
+                        ;  WORK FOR CALL TO COMMAND FILE
+                        ;
+ 07F9 00000000          CMDPTR  DW      0,0
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  26
+
+
+                        ;
+                        ;  DATA AREA
+                        ;
+                                DSEG
+                                ORG     800H
+                        ;
+                        CODCMD:                         ;TRANSIENT COMMAND TYPE
+ 0800 434D44                    DB      'CMD'
+                        ;
+ 0803 0000              DDMASG  DW      0               ;BASE PAGE SEGMENT
+ 0805 00                MDSUBE  DB      0               ;SUBMIT MODE
+ 0806 00                SUBFCB  DB      0               ;FCB FOR SUBMIT FILE
+ 0807 242424202020              DB      '$$$     SUB',0,0,0,0
+      202053554200
+      000000
+ 0816 000000000000              DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      000000000000
+      0000000000
+                        ;
+ 0827 00                WKFCB   DB      0               ;FCB FOR WORK
+ 0828 000000000000              DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      000000000000
+      000000
+ 0837 000000000000              DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      000000000000
+      00000000
+ 0847 00000000                  DB      0,0,0,0
+                        ;
+                        RWBUFF:                         ;ONE SECTOR READ WORK
+ 084B                           RS      128
+ 08CB 0000                      DB      0,0             ;NOT USED               ???
+ 08CD 00                BSDIRC  DB      0               ;BIAS OF DIRECTORY
+ 08CE 00                USRCOD  DB      0               ;USER CODE
+ 08CF 00                TRCMOD  DB      0               ;TRANSIENT COMMAND MODE    NOT USED ???
+                        ;
+                        ;
+ 08D0                           RS      96
+                        STACK:                          ;CCP STACK
+                        ;
+ 0930 09                WKBIOS  DB      9               ;BIOS DIRECT CALL WORK  9 IS SELECT DISK
+ 0931 0000                      DW      0               ;CX
+ 0933 0100                      DW      1               ;DX
+                        ;
+ 0935 0B00              PNTCMD  DW      CMBUFF+2        ;COMMAND BUFFER POINTER
+ 0937 0000              TPNCMD  DW      0               ;COMMAND BUFFER TEMPORARY POINTER FOR ERROR
+ 0939 00                CURDRV  DB      0               ;CURRENT DRIVE
+ 093A 00                TDRVNU  DB      0               ;TEMPORARY DRIVE MODE
+                        ;
+                        ;  INDEXED DATA
+                        ;
+                        IXTERM:                         ;TERMINATOR
+ 093B 203D5F2E3A3B              DB      ' =_.:;<>,'
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  27
+
+
+      3C3E2C
+                        IXRSCM:                         ;RESIDENT COMMAND
+ 0944 44495253                  DB      'DIRS'
+ 0948 55534552                  DB      'USER'
+ 094C 52454E20                  DB      'REN '
+ 0950 54595045                  DB      'TYPE'
+ 0954 45524120                  DB      'ERA '
+ 0958 44495220                  DB      'DIR '
+                        ;
+                        ;  COMMENTS
+                        ;
+ 095C 4E4F2046494C      CNOFIL  DB      'NO FILE',0
+      4500
+ 0964 414C4C202859      CALLOK  DB      'ALL (Y/N)?',0
+      2F4E293F00
+ 096F 46494C452045      CFLEXT  DB      'FILE EXISTS',0
+      584953545300
+ 097B 4D454D4F5259      CMNAVL  DB      'MEMORY NOT AVAILABLE',0
+      204E4F542041
+      5641494C4142
+      4C4500
+ 0990 524541442045      CRDERR  DB      'READ ERROR',0
+      52524F5200
+ 099B 0D0A43414E4E      CCLSER  DB      CR,LF,'CANNOT CLOSE',0
+      4F5420434C4F
+      534500
+ 09AA 0D0A4E4F4E2D      CNSYSF  DB      CR,LF,'NON-SYSTEM FILE(S) EXIST',0
+      53595354454D
+      2046494C4528
+      532920455849
+      535400
+ 09C5 0D0A53595354      CSYSFL  DB      CR,LF,'SYSTEM FILE(S) EXIST',0
+      454D2046494C
+      452853292045
+      5849535400
+                        ;
+                        ;  USER ID CODE
+                        ;
+                        IDCODE:
+ 09DC 01                        DB      1               ;OEM CODE
+ 09DD 0A                        DB      10              ;VERSION NUMBER
+ 09DE 00                        DB      0               ;PRODUCT NUMBER
+ 09DF 000000                    DB      0,0,0           ;USER ID NUMBER
+                        ;
+                        ;  RESIDENT COMMAND ROUTINE INDEX
+                        ;
+                        IXRSRT:
+ 09E2 9A04                      DW      DIRNON          ;DIR
+ 09E4 8A05                      DW      ERASE           ;ERA
+ 09E6 D205                      DW      TYPEOT          ;TYPE
+ 09E8 2A06                      DW      RENAMP          ;REN
+ 09EA A006                      DW      USER            ;USER
+CP/M ASM86 1.1  SOURCE: CCP.A86                                                                              PAGE  28
+
+
+ 09EC 8304                      DW      DIRSYS          ;DIRS
+ 09EE E406                      DW      TRCDSL          ;NOT RESIDENT
+                        ;
+                        ;
+                        ;
+ 09F0 00                MODIRE  DB      0               ;OTHER SIDE FILE EXIST MODE  0 NOT EXIST
+ 09F1 00                MODDIR  DB      0               ;DIRECTORY MODE  0 NON-SYSTEM  1 SYSTEM FILE
+                        ;
+                        ;  PATCH AREA
+                        ;
+                        ;  EQATIONS OF EXTERNAL LABELS
+                        ;
+                                                        ;24D8H  IS SYSTEM PAGE ???
+   24E0                 Y24E0   EQU     024E0H          ;MAX COLUMN
+                        ;
+                        ;
+                                CSEG
+                                ORG     0A00H
+                        ;
+ 0A00 3132204A616E              DB      '12 January 1982'
+      756172792031
+      393832
+                        ;
+                                ORG     0A15H
+ 0A15 120182                    DB      12H,01H,82H
+                        ;
+                                ORG     0A40H
+                        ;
+                        ;  DIRECTORY OUT PATCH FOR SHORT LINE DISPLAY
+                        ;
+                        DIRPAT:
+ 0A40 803EE0243C                CMP     BYTE PTR .Y24E0,60
+ 0A45 7203         0A4A         JC      DIRPAS          ;SHORT LINE
+ 0A47 E9DAFA       0524         JMP     DIROUP
+                        ;
+                        DIRPAS:                         ;SHORT LINE
+ 0A4A 2401                      AND     AL,01H
+ 0A4C E9D5FA       0524         JMP     DIROUP
+                        ;
+                                ORG     0A50H
+                        ;
+ 0A50 446563656D62              DB      'December 28 81'
+      657220323820
+      3831
+                        ;
+                        ;
+                                END
+
+
+END OF ASSEMBLY.  NUMBER OF ERRORS:   0.  USE FACTOR: 14%
+
+                        DIRPAS:                         ;SHORT LINE
