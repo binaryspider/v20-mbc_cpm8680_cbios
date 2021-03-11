@@ -11,7 +11,7 @@
 ; CHANGELOG:
 ;
 ; S220520           First release
-; S100321           SAH - CP/M-86/80 BIOS
+; S110321           SAH - CP/M-86/80 BIOS
 ;
 ; ********************************************************************************
 
@@ -1074,18 +1074,21 @@ save_rec_loop:
         pop     dx
         pop     cx
         or	al,al			; write error?
-        jnz	save_error		; yes
+        jnz	save_rec_close		; yes
 
         add     dx,080h			; advance dma offset
         loop    save_rec_loop		; loop until all written
 
 save_rec_close:
+	push	ax			; save last write status
         mov     dx,offset fcb80_2
         mov     cl,F_CLOSE
 	int	bdos_int		; close file
+	pop	ax
 
-        mov     bx,offset msg_save_ok	; 'save successful'
-        jmps    save_complete
+        mov     bx,offset msg_save_ok	; assume 'save successful'
+	or	al,al			; write ok?
+	jz	save_complete		; yes
 
 save_error:
         mov     bx,offset msg_save_err	; 'save failed'
@@ -1104,7 +1107,7 @@ parse_tail:
 	push	ax
 	mov	byte ptr ccp_parse_patch,0c3h ; patch ccp parse routine with a ret
 
-	mov	bx,word ptr mcb_segment	; destination cpm80 bank
+	mov	bx,word ptr mcb_segment	; destination 8080 bank
 	call	ccp_parse 		; parse command line to fcb1 and fcb2
 
 	pop	ax
@@ -1484,7 +1487,7 @@ signon  db  cr,lf,cr,lf
 signon  db  cr,lf,cr,lf
         db  'V20-MBC CP/M-86',0
 sign80  db  '/80',0
-signver db  ' BIOS - S100321'
+signver db  ' BIOS - S110321'
         db  cr,lf
         db  'CP/M-86 Version 1.1 - ', 0
 msg128  db  '128', 0
@@ -1805,7 +1808,7 @@ bdos_segment    rw  1
     IF  not loader_bios
 ;--vv---------------- SAH ----------------vv--
 ;|                                           |
-; Skeletal cpm80 bios map of 8080 bank
+; Skeletal cpm80 map of 8080 bank
 
 	org	0
 bios_jmp	rs	3		; jmp to bios
