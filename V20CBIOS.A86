@@ -98,13 +98,13 @@ EndM
 C_RAWIO		equ	6	; Perform Direct I/O
 C_STAT		equ	11	; Get Console Status
 F_CLOSE		equ	16	; Close File
+DRV_SET 	equ	14	; Set Default Drive 
 F_DELETE	equ	19	; Delete File
 F_READ		equ	20	; Read Sequential 
 F_WRITE 	equ	21	; Write Sequential
 F_MAKE		equ	22	; Create File
 F_DMAOFF	equ	26	; Set DMA Buffer Offset
 DRV_ALLOCVEC	equ	27	; Get Allocation Vector Address
-DRV_GET		equ	25	; Get Default Drive
 DRV_DPB		equ	31	; Get DPB Address
 S_BIOS		equ	50	; Call BIOS Routine 
 F_DMASEG	equ	51	; Set DMA Segment
@@ -127,6 +127,7 @@ ccp_file	equ	.0827h	; drive+filename to be loaded
 ccp_file_type	equ	.0830h	; filetype of ^
 ccp_file_rec	equ	.0847h	; record count of ^
 ccp_file_ext	equ	.0833h	; extent number of ^
+ccp_cur_drv	equ	.0939h	; current drive
 
 com_patch       equ     .0727h  ; address in ccp to be patched to force
                                 ; jump to bios routine to check for .com
@@ -1210,9 +1211,9 @@ cpm80_init:
 	mov	es,word ptr mcb_segment
 	mov	es:byte ptr iobyte80,al	; set default cpm80 i/o byte
 
-	mov	cl,DRV_GET
-	int	bdos_int		; current drive
+	mov	al,byte ptr ccp_cur_drv
 	mov	es:byte ptr defdrv80,al	; set default cpm80 drive
+	mov	byte ptr org_cur_drv,al	; and save for exit
 
 	mov	dx,offset dmabuf80
 	mov	cl,F_DMAOFF
@@ -1281,6 +1282,10 @@ cpm80_cleanup:
 	mov	byte ptr mcb_ext,0	; allocated
 	mov	cl,MC_FREE
 	int	bdos_int		; release allocated memory
+
+	mov	dl,byte ptr org_cur_drv
+	mov	cl,DRV_SET
+	int	bdos_int		; set original current drive
 
 	jmp	ccp_cleanup		; reset default disk drive and return
 
@@ -1530,6 +1535,7 @@ RAMlen      dw      tpa_len         ; ...and extends to the end of RAM
 ;|                                           |
 v20_cpu		db	false	; assume not v20 processor
 save_count	db	0	; number of pages to SAVE
+org_cur_drv	rb	1	;
 
 ; memory control block for 8080 segment
 mcb_segment	dw	0	; segment filled in later
